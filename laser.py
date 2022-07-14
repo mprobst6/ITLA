@@ -1,4 +1,6 @@
-from RS232 import *
+from RS232 import ITLA
+from globals import *
 
 if __name__ == '__main__':
-    print(ITLAConnect(5))
+    print(ITLA_NOERROR)
+    laser = ITLA()

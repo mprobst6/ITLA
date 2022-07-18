@@ -3,7 +3,6 @@ import time
 import struct
 import os
 import os.path
-import time
 import sys
 import threading
 from globals import *
@@ -19,7 +18,7 @@ class ITLA:
         self._error=ITLA_NOERROR
         self.seriallock=0
         self.conn = []
-        self.verbose = True
+        self.verbose = False
 
 
     def stripString(self,input):
@@ -117,7 +116,7 @@ class ITLA:
         self.conn.close()
         return(ITLA_ERROR_SERBAUD)
     
-    def ITLA_disconnect(self):
+    def disconnect(self):
         self.conn.close()
 
     def ITLA(self,register,data,rw):
@@ -281,6 +280,16 @@ class ITLA:
         register = REG_Power
         set_power = self.ITLA(register,data,WRITE)
         return set_power
+    
+    def wait_until_no_operation(self):
+        register = REG_Nop
+        data = []
+        while data != 16:
+            data = self.ITLA(register,0,0)
+            print(f'NOP returned: {data}')
+        print(f'NOP returned {data}')
+        return data
+
 
     def get_power_dBm(self):
         register = REG_Power
@@ -290,11 +299,13 @@ class ITLA:
         register = REG_Resena
         data = 8
         self.ITLA(register,data,WRITE)
+        self.wait_until_no_operation()
 
     def turn_off(self):
         register = REG_Resena
         data = 0
         self.ITLA(register,data,WRITE)
+        self.wait_until_no_operation()
     
     def set_wavelength_nm(self,wavelength):
         self.set_frequency_THz(3e5/wavelength)
@@ -309,6 +320,10 @@ class ITLA:
         data_GHz = 10000*(frequency-data_THz)
         self.ITLA(THz_register,data_THz,WRITE)
         self.ITLA(GHz_register,data_GHz,WRITE)
+
+# TODO: figure out what happens if the specified frequency is out of range
+#       and put checks in to stop whatever happens from happening
+
 
     def get_frequency_THz(self):
         THz_register = REG_Fcf1
@@ -329,7 +344,7 @@ class ITLA:
         
         if error_message == 1: # execution error
             self.ITLA_disconnect()
-            quit()
+            print('error')
 
         return 256*byte2 + byte3
 
@@ -348,16 +363,23 @@ class ITLA:
 
 if __name__ == '__main__':
     laser = ITLA()
-    laser.connect('com5')
-    laser.set_power_dBm(8.5)
-    laser.turn_on()
-    time.sleep(10)
-    laser.turn_off()
 
-    # print(f'initial mode: {laser.get_mode()}')
-    # laser.set_mode(MODE_Nodither)
-    # print(f'final mode: {laser.get_mode()}')
-    laser.ITLA_disconnect()
+    laser.connect('com7')
+
+    laser.set_power_dBm(10)
+    laser.set_wavelength_nm(1530)
+    print('set power')
+    laser.turn_on()
+    print('turned on')
+    time.sleep(5)
+    laser.turn_off()
+    laser.set_wavelength_nm(1560)
+    print('changed frequency')
+    laser.turn_on()
+    print('turned on again')
+    time.sleep(5)
+    laser.turn_off()
+    laser.disconnect()
     print('disconnected')
 
     # seem to be sending ok, receiving si the sisue

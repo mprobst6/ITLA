@@ -68,6 +68,6 @@ MODE_Nodither = 1
 MODE_Whisper = 2
 
 # CONSTANTS
-READ=0
-WRITE=1
+READ = 0
+WRITE = 1
 

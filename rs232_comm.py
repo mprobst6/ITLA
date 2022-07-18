@@ -360,7 +360,6 @@ class ITLA:
 
 
 
-
 if __name__ == '__main__':
     laser = ITLA()
 

@@ -1,3 +1,4 @@
+# ERROR CODES
 ITLA_NOERROR=0x00
 ITLA_EXERROR=0x01
 ITLA_AEERROR=0x02
@@ -7,6 +8,7 @@ ITLA_CSERROR=0x05
 ITLA_ERROR_SERPORT=0x01
 ITLA_ERROR_SERBAUD=0x02
 
+# REGISTER ADDRESSES
 REG_Nop=0x00            # (read only) NOP / status
 REG_Mfgr=0x02           # (read only) device type
 REG_Model=0x03          # (read only) model ID
@@ -60,5 +62,12 @@ REG_CjumpSled=0xEC
 REG_Cjumpon=0xED
 REG_Cjumpoffset=0xE6
 
+# OPERATING MODES
+MODE_Standard = 0
+MODE_Nodither = 1
+MODE_Whisper = 2
+
+# CONSTANTS
 READ=0
 WRITE=1
+

@@ -20,7 +20,47 @@ class ITLA:
         self.conn = []
         self.verbose = False
 
-
+# Connect and disconnect
+    def connect(self,port: str,baudrate=9600):
+        '''
+        Function:
+            Establish serial connection with the ITLA at the maximum possible baud rate
+        Inputs:
+            Port to connect, initial baud rate
+        Outputs:
+            Errors if present
+        '''
+        reftime=time.process_time()
+        try:
+            self.conn = serial.Serial(port,baudrate, timeout=1)
+        except serial.SerialException:
+            return(ITLA_ERROR_SERPORT)
+        baudrate2=4800
+        while baudrate2<115200:
+            self.ITLA(REG_Nop,0,0)
+            if self.last_error() != ITLA_NOERROR:
+                #go to next baudrate
+                if baudrate2==4800:baudrate2=9600
+                elif baudrate2==9600: baudrate2=19200
+                elif baudrate2==19200: baudrate2=38400
+                elif baudrate2==38400:baudrate2=57600
+                elif baudrate2==57600:baudrate2=115200
+                self.conn.close()
+                self.conn = serial.Serial(port,baudrate2 , timeout=1)            
+            else:
+                return
+        self.conn.close()
+        return(ITLA_ERROR_SERBAUD)
+    
+    def disconnect(self) -> None:
+        '''
+        Function:
+            Close the serial connection with the ITLA
+        '''
+        self.conn.close()
+    
+    
+# Basic operations
     def stripString(self,input):
         outp=''
         input=str(input)
@@ -30,7 +70,7 @@ class ITLA:
             teller=teller+1
         return(outp)
 
-    def ITLALastError(self):
+    def last_error(self) -> int:
         return(self._error)
 
     def SerialLock(self):
@@ -46,8 +86,36 @@ class ITLA:
         self.queue
         self.seriallock=0
         self.queue.pop(0)
+    
+    def serial_number(self):
+        register = REG_Serial
+        return self.ITLA(register,0,READ)
+
+    def wait_until_no_operation(self):
+        '''
+        Function:
+            Monitor the NOP register and halt operations until it is clear
+        Returns:
+            NOP register
+        '''
+        register = REG_Nop
+        data = []
+        print('Waiting for operation to complete')
+        while data != 16:
+            data = self.ITLA(register,0,0)
+        print(f'NOP returned {data}')
+        return data
         
+# Transmitting and receiving methods
     def checksum(self,byte0,byte1,byte2,byte3):
+        '''
+        Function:
+            Compute the checksum for error detection
+        Inputs:
+            Bytes being prepared to be passed to the serial connection
+        Outputs:
+            Checksum bit        
+        '''
         bip8=(byte0&0x0f)^byte1^byte2^byte3   # & means AND, ^ means XOR
         bip4=((bip8&0xf0)>>4)^(bip8&0x0f)     # >> moves bits to the left, << moves to the right
         return bip4
@@ -93,45 +161,7 @@ class ITLA:
             self._error=ITLA_CSERROR
             return(byte0,byte1,byte2,byte3)       
 
-    def connect(self,port,baudrate=9600):
-        '''
-        Function:
-            Establish serial connection with the ITLA at the maximum possible baud rate
-        Inputs:
-            Port to connect, initial baud rate
-        Outputs:
-            Errors if present
-        '''
-        reftime=time.process_time()
-        try:
-            self.conn = serial.Serial(port,baudrate, timeout=1)
-        except serial.SerialException:
-            return(ITLA_ERROR_SERPORT)
-        baudrate2=4800
-        while baudrate2<115200:
-            self.ITLA(REG_Nop,0,0)
-            if self.ITLALastError() != ITLA_NOERROR:
-                #go to next baudrate
-                if baudrate2==4800:baudrate2=9600
-                elif baudrate2==9600: baudrate2=19200
-                elif baudrate2==19200: baudrate2=38400
-                elif baudrate2==38400:baudrate2=57600
-                elif baudrate2==57600:baudrate2=115200
-                self.conn.close()
-                self.conn = serial.Serial(port,baudrate2 , timeout=1)            
-            else:
-                return
-        self.conn.close()
-        return(ITLA_ERROR_SERBAUD)
-    
-    def disconnect(self) -> None:
-        '''
-        Function:
-            Close the serial connection with the ITLA
-        '''
-        self.conn.close()
-
-    def ITLA(self,register,data,rw):
+    def ITLA(self,register: int,data: int,rw: int):
         '''
         Function:
             Prepare and send data to the ITLA
@@ -151,7 +181,10 @@ class ITLA:
         if rw==0: # read
             byte2=int(data/256)
             byte3=int(data-byte2*256)
-            latestregister=register
+            self.latestregister=register
+            if self.verbose:
+                print('\nWriting the following command:')
+                print(f'byte0: {hex(byte0)}, byte1: {hex(byte1)}, byte2: {hex(byte2)}, byte3: {hex(byte3)}')
             self.send_command(int(self.checksum(0,register,byte2,byte3))*16,register,byte2,byte3)
             response = self.receive_response()
             self.decode_response(response)
@@ -159,12 +192,14 @@ class ITLA:
             b1 = response[1]
             b2 = response[2]
             b3 = response[3]
-            if (b0&0x03)==0x02:
-                response=AEA(b2*256+b3)
+            if (b0&0x03)==0x02: # check if bits 24 and 25 are 0x02 (flag for AEA)
+                response=self.AEA(b2*256+b3)
+                if self.verbose:
+                    print(f'\nVerbose string: {response}')
                 lock.acquire()
                 self.queue.pop(0)
                 lock.release()
-                return 256*b2 + b3
+                return response
             lock.acquire()
             self.queue.pop(0)
             lock.release()
@@ -174,11 +209,8 @@ class ITLA:
             byte3=int(data-byte2*256)
             byte0 = int(self.checksum(1,register,byte2,byte3))*16+1
             if self.verbose:
-                print('\nWriting the following command')
-                print(f'byte0: {hex(byte0)}')
-                print(f'register: {hex(register)}') 
-                print(f'byte2: {hex(byte2)}')
-                print(f'byte3: {hex(byte3)}')            
+                print('\nWriting the following command:')
+                print(f'byte0: {hex(byte0)}, byte1: {hex(byte1)}, byte2: {hex(byte2)}, byte3: {hex(byte3)}')
             self.send_command(byte0,register,byte2,byte3)
             response = self.receive_response()
             self.decode_response(response)
@@ -187,16 +219,27 @@ class ITLA:
             lock.release()
             return 256*response[2] + response[3]
             
-    def AEA(self,bytes):
+    def AEA(self,bytes) -> str:
+        '''
+        Function:
+            During automatic extended addressing, the data is stored in 
+            register REG_AeaEar and the data is extracted serially as a
+            string
+        Inputs: 
+            Number of bytes
+        Outputs:
+            String of data pulled from AEA register
+        '''
         outp=''
         while bytes>0:
             self.send_command(int(self.checksum(0,REG_AeaEar,0,0))*16,REG_AeaEar,0,0)
             test=self.receive_response()
-            outp=outp+chr(test[2])
-            outp=outp+chr(test[3])
-            bytes=bytes-2
+            outp = outp + chr(test[2])
+            outp = outp + chr(test[3])
+            bytes = bytes - 2
         return outp
 
+# Laser characteristic methods
     def set_power_dBm(self,power):
         '''
         Function:
@@ -206,36 +249,22 @@ class ITLA:
         '''
         data = 100*power  # data to send to the laser
         register = REG_Power
-        set_power = self.ITLA(register,data,WRITE)
-        return set_power
-    
-    def wait_until_no_operation(self):
-        '''
-        Function:
-            Monitor the NOP register and halt operations until it is clear
-        Returns:
-            NOP register
-        '''
-        register = REG_Nop
-        data = []
-        while data != 16:
-            data = self.ITLA(register,0,0)
-            print(f'NOP returned: {data}')
-        print(f'NOP returned {data}')
-        return data
-
+        if data >= self.get_min_power() and data <= self.get_max_power():
+            self.ITLA(register,data,WRITE)
+            return
+        raise RuntimeError('Invalid choice for power %s dBm' % power)
 
     def get_power_dBm(self):
         '''
         Function:
             Return the laser diode set power in dBm
-        Return:
+        Outputs:
             Set laser diode power
         '''
         register = REG_Power
         return self.ITLA(register,0,READ)/100
 
-    def turn_on(self):
+    def turn_on(self) -> None:
         '''
         Function:
             Turn on the laser diode
@@ -245,7 +274,7 @@ class ITLA:
         self.ITLA(register,data,WRITE)
         self.wait_until_no_operation()
 
-    def turn_off(self):
+    def turn_off(self) -> None:
         '''
         Function:
             Turn off the laser diode
@@ -255,7 +284,7 @@ class ITLA:
         self.ITLA(register,data,WRITE)
         self.wait_until_no_operation()
     
-    def set_wavelength_nm(self,wavelength):
+    def set_wavelength_nm(self,wavelength: float) -> None:
         '''
         Function:
             Set the laser wavelength
@@ -264,7 +293,7 @@ class ITLA:
         '''
         self.set_frequency_THz(3e5/wavelength)
 
-    def get_wavelength_nm(self):
+    def get_wavelength_nm(self) -> float:
         '''
         Function:
             Get the laser wavelength 
@@ -273,7 +302,7 @@ class ITLA:
         '''
         return 3e5/self.get_frequency_THz()
     
-    def set_frequency_THz(self,frequency):
+    def set_frequency_THz(self,frequency: float) -> None:
         '''
         Function:
             Set the laser frequency 
@@ -284,17 +313,13 @@ class ITLA:
             THz_register = REG_Fcf1
             GHz_register = REG_Fcf2
             data_THz = int(frequency)
-            data_GHz = 10000*(frequency-data_THz)
+            data_GHz = int(10000*(frequency-data_THz))
             self.ITLA(THz_register,data_THz,WRITE)
             self.ITLA(GHz_register,data_GHz,WRITE)
             return
         raise RuntimeError('Invalid choice for frequency : %s' % frequency)
 
-# TODO: figure out what happens if the specified frequency is out of range
-#       and put checks in to stop whatever happens from happening
-
-
-    def get_frequency_THz(self):
+    def get_frequency_THz(self) -> float:
         '''
         Function:
             Return the frequency of the laser in THz
@@ -326,8 +351,9 @@ class ITLA:
                 print(f'byte{byte}: {hex(data)}')
         
         if error_message == 1: # execution error
+            self.turn_off()
             self.disconnect()
-            print('error')
+            print('Execution Error. Disconnected.')
 
         return 256*byte2 + byte3
 
@@ -339,7 +365,7 @@ class ITLA:
             Operating mode
         '''
         register = REG_Mode
-        self.ITLA(register,mode,READ)
+        self.ITLA(register,mode,WRITE)
     
     def get_mode(self):
         '''
@@ -350,40 +376,71 @@ class ITLA:
         '''
         register = REG_Mode
         return self.ITLA(register,0,READ)
+        
+    def get_temperature(self) -> int:
+        '''
+        Function:
+            Return the current temperature (monitored by the temperature alarm
+            encoded as deg(C)*100)
+        Outputs:
+            Current temperature
+        '''
+        register = REG_Ctemp
+        return self.ITLA(register,0,READ)
+    
+    def get_max_power(self) -> int:
+        '''
+        Function:
+            Return the maximum allowed temperature
+        Outputs:
+            Maximum output power in 100*dBm
+        '''
+        register = REG_Opsh
+        return self.ITLA(register,0,READ)
 
+    def get_min_power(self) -> int:
+        '''
+        Function:
+            Return the minimum allowed temperature
+        Outputs:
+            Minimum output power in 100*dBm
+        '''
+        register = REG_Opsl
+        return self.ITLA(register,0,READ)
 
 
 
 if __name__ == '__main__':
     laser = ITLA()
 
-    laser.connect('com7')
+    laser.connect('com5')
+    print('connected')
 
     laser.set_power_dBm(10)
-    laser.set_frequency_THz(191.5)
+    print('set laser power')
+
+    print('turning on laser')
+    laser.turn_on()
+
+    laser.turn_off()
+    print('turned off laser')
+
+    laser.set_power_dBm(8)
     print('set power')
-    laser.turn_on()
+
+    laser.set_wavelength_nm(1540)
+    print('print set wavelength')
+
     print('turned on')
-    time.sleep(5)
-    laser.turn_off()
-    laser.set_frequency_THz(196.25)
-    print('changed frequency')
     laser.turn_on()
-    print('turned on again')
-    time.sleep(5)
+
     laser.turn_off()
+    print('turned off')
+
     laser.disconnect()
     print('disconnected')
 
 # TODO: mode setting
-# TODO: current and temperature monitoring
-# TODO: see if the threading and the queue are necessary
-# TODO: add comments
-# TODO: ensure the verbose flag is working the way I want
-# TODO: reorganize functions in a way I like
-
-# DONE:
-# frequency checks work
 
 
 

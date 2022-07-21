@@ -1,3 +1,14 @@
+'''
+Global variables used by the ITLA.
+The variables are broken into several categories:
+    Error codes
+    Register addresses
+    Operating modes
+    Constants
+    Error Messages
+'''
+# TODO: figure out which operating mode we are in and let the powerpoint reflect that
+
 # ERROR CODES
 ITLA_NOERROR=0x00
 ITLA_EXERROR=0x01
@@ -77,3 +88,10 @@ MODE_Whisper = 2
 READ = 0
 WRITE = 1
 
+# ERROR MESSAGES
+error_messages = {
+    '0' : 'OK flag (normal return status)',
+    '1' : 'XE flag (execution error)',
+    '2' : 'AEA flag (automatic extended addressing result being returned or ready to write)',
+    '3' : 'CP flag (command not complete, pending)'
+}

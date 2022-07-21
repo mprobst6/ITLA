@@ -1,3 +1,11 @@
+'''
+Class and methods concerning communication with the Pure Photonics ITLA
+Capabilities include turning on and off the laser, changing the frequency and power
+Communication is done using RS-232 interface through a micro-usb but can be modified
+    to be used without the micro-usb
+'''
+
+
 import serial
 import time
 import struct
@@ -6,10 +14,9 @@ import os.path
 import sys
 import threading
 from globals import *
-from response import *
 
 class ITLA:
-    def __init__(self):
+    def __init__(self,port,baudrate=9600,verbose=True):
         self.latestregister=0
         self.tempport=0
         self.raybin=0
@@ -19,6 +26,13 @@ class ITLA:
         self.seriallock=0
         self.conn = []
         self.verbose = False
+
+        self.connect(port,baudrate)
+
+        self.max_power = self.get_max_power()
+        self.min_power = self.get_min_power()
+
+        self.verbose = verbose
 
 # Connect and disconnect
     def connect(self,port: str,baudrate=9600):
@@ -100,10 +114,12 @@ class ITLA:
         '''
         register = REG_Nop
         data = []
-        print('Waiting for operation to complete')
+        
         while data != 16:
+            print('\nWaiting for operation to complete')
+            time.sleep(5)
             data = self.ITLA(register,0,0)
-        print(f'NOP returned {data}')
+        print('\nOperation completed')
         return data
         
 # Transmitting and receiving methods
@@ -181,11 +197,12 @@ class ITLA:
         if rw==0: # read
             byte2=int(data/256)
             byte3=int(data-byte2*256)
+            byte0 = int(self.checksum(0,register,byte2,byte3))*16
             self.latestregister=register
             if self.verbose:
                 print('\nWriting the following command:')
-                print(f'byte0: {hex(byte0)}, byte1: {hex(byte1)}, byte2: {hex(byte2)}, byte3: {hex(byte3)}')
-            self.send_command(int(self.checksum(0,register,byte2,byte3))*16,register,byte2,byte3)
+                print(f'byte0: {hex(byte0)}, byte1: {hex(register)}, byte2: {hex(byte2)}, byte3: {hex(byte3)}')
+            self.send_command(byte0,register,byte2,byte3)
             response = self.receive_response()
             self.decode_response(response)
             b0 = response[0]
@@ -210,7 +227,7 @@ class ITLA:
             byte0 = int(self.checksum(1,register,byte2,byte3))*16+1
             if self.verbose:
                 print('\nWriting the following command:')
-                print(f'byte0: {hex(byte0)}, byte1: {hex(byte1)}, byte2: {hex(byte2)}, byte3: {hex(byte3)}')
+                print(f'byte0: {hex(byte0)}, byte1: {hex(register)}, byte2: {hex(byte2)}, byte3: {hex(byte3)}')
             self.send_command(byte0,register,byte2,byte3)
             response = self.receive_response()
             self.decode_response(response)
@@ -249,7 +266,7 @@ class ITLA:
         '''
         data = 100*power  # data to send to the laser
         register = REG_Power
-        if data >= self.get_min_power() and data <= self.get_max_power():
+        if data >= self.min_power and data <= self.max_power:
             self.ITLA(register,data,WRITE)
             return
         raise RuntimeError('Invalid choice for power %s dBm' % power)
@@ -347,35 +364,18 @@ class ITLA:
         byte3 = response[3]
         error_message = byte0 & 3  # extract bits 25 and 24
         if self.verbose:
-            for byte,data in enumerate(response):
-                print(f'byte{byte}: {hex(data)}')
-        
+            # for byte,data in enumerate(response):
+            #     print(f'byte{byte}: {hex(data)}')
+            
+            print('\nReceived')
+            print(f'byte0: {hex(byte0)}, byte1: {hex(byte1)}, byte2: {hex(byte2)}, byte3: {hex(byte3)}')
+
         if error_message == 1: # execution error
+            print('Execution Error. Disconnected.')
             self.turn_off()
             self.disconnect()
-            print('Execution Error. Disconnected.')
-
+            
         return 256*byte2 + byte3
-
-    def set_mode(self,mode) -> None:
-        '''
-        Function:
-            Set the operating mode of the laser (see globals.py for modes)
-        Inputs:
-            Operating mode
-        '''
-        register = REG_Mode
-        self.ITLA(register,mode,WRITE)
-    
-    def get_mode(self):
-        '''
-        Function:
-            Return the operating mode of the laser (see globals.py for modes)
-        Outputs:
-            Operating mode
-        '''
-        register = REG_Mode
-        return self.ITLA(register,0,READ)
         
     def get_temperature(self) -> int:
         '''
@@ -411,36 +411,39 @@ class ITLA:
 
 
 if __name__ == '__main__':
-    laser = ITLA()
+    laser = ITLA('com5',verbose=True)
+    print('CONNECTED')
 
-    laser.connect('com5')
-    print('connected')
+    print(f'TEMPERATURE: {laser.get_temperature()}')
 
+    print('SETTING POWER')
     laser.set_power_dBm(10)
-    print('set laser power')
 
-    print('turning on laser')
+    print('SETTING FREQUENCY')
+    laser.set_wavelength_nm(1535)
+
+    print('TURNING ON')
     laser.turn_on()
 
-    laser.turn_off()
-    print('turned off laser')
+    time.sleep(5)
 
+    print('TURNING OFF')
+    laser.turn_off()
+
+    print('SETTING POWER')
     laser.set_power_dBm(8)
-    print('set power')
 
-    laser.set_wavelength_nm(1540)
-    print('print set wavelength')
-
-    print('turned on')
+    print('TURNING ON')
     laser.turn_on()
 
+    time.sleep(5)
+
+    print('TURNING OFF')
     laser.turn_off()
-    print('turned off')
 
+    
+    print('DISCONNECTING')
     laser.disconnect()
-    print('disconnected')
-
-# TODO: mode setting
 
 
 

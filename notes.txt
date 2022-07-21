@@ -1,0 +1,48 @@
+Compatibility changes
+---------------------
+changed <> to !=
+changed print statements to include parenthesis
+installed pyserial to import serial
+changed time.clock() to time.process_time()
+modified write statements to encode unicode strings with .encode('utf-8')
+
+
+
+RS-232 Communication
+--------------------
+Communication protocol: 4 consecutive bytes are sent in either direction
+    before a response (again 4 bytes) is required
+
+
+Transmitting
+------------
+Byte 0: Bits 31-28 contain the checksum to detect errors
+        Bit 27 is the LstRsp bit for communication errors
+        Bits 25-24 are empty
+        Bit 24 indicates read (0) or write (1)
+Byte 1: Target register (0x00-0xff)
+Byte 2: Data (15:8) (0x00-0xff)
+Byte 3: Data(7:0) (0x00-0xff)
+
+
+Receiving
+---------
+Byte 0: Bits 31-28 contain the checksum to detect errors
+        Bit 27 indicates if the last received packet was consistent (1) or inconsistent (0)
+        Bit 26 is not used and is standard 1 (different firmware may mean standard 0)
+        Bits 25-24 are error messages
+            0x00: OK flag normal return status
+            0x01: XE flag (execution error)
+            0x02: AEA flag (automatic extended addressing)
+            0x03: CP flag (command not complete, pending)
+Byte 1: Register information
+Byte 2: Data (15:8) (0x00-0xff)
+Byte 3: Data (7:0) (0x00-0xff)
+
+
+Automatic Extended Addressing (AEA)
+-----------------------------------
+A communication scheme that enables reading and writing messages 
+    longer than 16 bits (e.g.) serial numbers
+
+

@@ -175,7 +175,32 @@ class ITLA:
             return(byte0,byte1,byte2,byte3)
         else:
             self._error=ITLA_CSERROR
-            return(byte0,byte1,byte2,byte3)       
+            return(byte0,byte1,byte2,byte3)
+
+    def decode_response(self,response):
+        '''
+        Function:
+            Decode the response sent by the ITLA
+        Inputs:
+            4-byte string sent from the ITLA
+        Outputs:
+            Data bits returned from the ITLA
+        '''
+        byte0 = response[0]
+        byte1 = response[1]
+        byte2 = response[2]
+        byte3 = response[3]
+        error_message = byte0 & 3  # extract bits 25 and 24
+        if self.verbose:
+            print('\nReceived')
+            print(f'byte0: {hex(byte0)}, byte1: {hex(byte1)}, byte2: {hex(byte2)}, byte3: {hex(byte3)}')
+
+        if error_message == 1: # execution error
+            print('Execution Error. Disconnected.')
+            self.turn_off()
+            self.disconnect()
+            
+        return 256*byte2 + byte3   
 
     def ITLA(self,register: int,data: int,rw: int):
         '''
@@ -195,9 +220,9 @@ class ITLA:
         while self.queue[0] != rowticket:
             rowticket=rowticket
         if rw==0: # read
-            byte2=int(data/256)
-            byte3=int(data-byte2*256)
-            byte0 = int(self.checksum(0,register,byte2,byte3))*16
+            byte2=int(data/256) # take the integer (0-65355) and extract the top two bits in hexidecimal
+            byte3=int(data-byte2*256) # extract the last two hexidecimal bits of the integer
+            byte0 = int(self.checksum(0,register,byte2,byte3))*16 # checksum for error calculations
             self.latestregister=register
             if self.verbose:
                 print('\nWriting the following command:')
@@ -236,7 +261,7 @@ class ITLA:
             lock.release()
             return 256*response[2] + response[3]
             
-    def AEA(self,bytes) -> str:
+    def AEA(self,bytes: int) -> str:
         '''
         Function:
             During automatic extended addressing, the data is stored in 
@@ -248,16 +273,16 @@ class ITLA:
             String of data pulled from AEA register
         '''
         outp=''
-        while bytes>0:
-            self.send_command(int(self.checksum(0,REG_AeaEar,0,0))*16,REG_AeaEar,0,0)
+        while bytes>0: # bytes is the number of bytes to pull from the register, it is not the information itself
+            self.send_command(int(self.checksum(0,REG_AeaEar,0,0))*16,REG_AeaEar,0,0) # pull from AEA register
             test=self.receive_response()
-            outp = outp + chr(test[2])
+            outp = outp + chr(test[2]) # record the data bits of the pull as a string and concatenate
             outp = outp + chr(test[3])
-            bytes = bytes - 2
+            bytes = bytes - 2 # decrement the bytes remaining by two
         return outp
 
 # Laser characteristic methods
-    def set_power_dBm(self,power):
+    def set_power_dBm(self,power: int):
         '''
         Function:
             Set the power of the laser in dBm
@@ -266,7 +291,7 @@ class ITLA:
         '''
         data = 100*power  # data to send to the laser
         register = REG_Power
-        if data >= self.min_power and data <= self.max_power:
+        if data >= self.min_power and data <= self.max_power: # check if power is in allowed range
             self.ITLA(register,data,WRITE)
             return
         raise RuntimeError('Invalid choice for power %s dBm' % power)
@@ -281,25 +306,6 @@ class ITLA:
         register = REG_Power
         return self.ITLA(register,0,READ)/100
 
-    def turn_on(self) -> None:
-        '''
-        Function:
-            Turn on the laser diode
-        '''
-        register = REG_Resena
-        data = 8
-        self.ITLA(register,data,WRITE)
-        self.wait_until_no_operation()
-
-    def turn_off(self) -> None:
-        '''
-        Function:
-            Turn off the laser diode
-        '''
-        register = REG_Resena
-        data = 0
-        self.ITLA(register,data,WRITE)
-        self.wait_until_no_operation()
     
     def set_wavelength_nm(self,wavelength: float) -> None:
         '''
@@ -327,6 +333,13 @@ class ITLA:
             Frequency (in THz)
         '''
         if frequency <= 196.25 and frequency >= 191.5:
+            # frequency is divided into two registers, one to record the 
+            # THZ component and one to record the GHz component, the THz
+            # is set by an integer corresponding to the number of THZ 
+            # but the GHz component is 10 * GHz. e.g. If the frequency is
+            # 193.4873, 193 should be written to the THz register and 
+            # 4873 to the GHz register 
+
             THz_register = REG_Fcf1
             GHz_register = REG_Fcf2
             data_THz = int(frequency)
@@ -348,34 +361,6 @@ class ITLA:
         data_THz = self.ITLA(THz_register,0,READ)
         data_GHz = self.ITLA(GHz_register,0,READ)
         return data_THz + data_GHz/10000      
-    
-    def decode_response(self,response):
-        '''
-        Function:
-            Decode the response sent by the ITLA
-        Inputs:
-            4-byte string sent from the ITLA
-        Outputs:
-            Data bits returned from the ITLA
-        '''
-        byte0 = response[0]
-        byte1 = response[1]
-        byte2 = response[2]
-        byte3 = response[3]
-        error_message = byte0 & 3  # extract bits 25 and 24
-        if self.verbose:
-            # for byte,data in enumerate(response):
-            #     print(f'byte{byte}: {hex(data)}')
-            
-            print('\nReceived')
-            print(f'byte0: {hex(byte0)}, byte1: {hex(byte1)}, byte2: {hex(byte2)}, byte3: {hex(byte3)}')
-
-        if error_message == 1: # execution error
-            print('Execution Error. Disconnected.')
-            self.turn_off()
-            self.disconnect()
-            
-        return 256*byte2 + byte3
         
     def get_temperature(self) -> int:
         '''
@@ -407,6 +392,26 @@ class ITLA:
         '''
         register = REG_Opsl
         return self.ITLA(register,0,READ)
+    
+    def turn_on(self) -> None:
+        '''
+        Function:
+            Turn on the laser diode
+        '''
+        register = REG_Resena
+        data = 8
+        self.ITLA(register,data,WRITE)
+        self.wait_until_no_operation() # laser takes significant time to turn on
+
+    def turn_off(self) -> None:
+        '''
+        Function:
+            Turn off the laser diode
+        '''
+        register = REG_Resena
+        data = 0
+        self.ITLA(register,data,WRITE)
+        self.wait_until_no_operation()
 
 
 
@@ -444,6 +449,9 @@ if __name__ == '__main__':
     
     print('DISCONNECTING')
     laser.disconnect()
+
+    # TODO: execution error flag not handled well, not a problem with trying to turn off
+    #       probably need to clear the flag or something
 
 
 
